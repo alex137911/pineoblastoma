@@ -1,6 +1,6 @@
 # Human-Zebrafish Orthologs listed in HGNC Comparison of Orthology Predictions (HCOP)
 # Note that HCOP (i.e., HGNC Comparison of Orthology Predictions) uses 
-# Ensembl v109 as of May 15, 2024
+# Ensembl v109 as of May 8, 2024
 # https://genenames.org/help/hcop/
 
 # Remove objects in workspace
@@ -62,10 +62,10 @@ multipleSheets <- function(fname) {
   return(combined_df)
 } 
 
-# Path to the Excel file
+# Path to Excel file
 path <- "farrell_categorized-genes-spatiotemporal-variation.xlsx"
 
-# Calling the function and storing the result
+# Calling function and storing result
 farrell_categorizedGenes <- multipleSheets(path)
 
 farrell_categorizedGenes <- read_excel("farrell_categorized-genes-spatiotemporal-variation.xlsx")
@@ -393,13 +393,6 @@ HGNCzebrafish_human <- hgnc_orthologsDF %>%
     )
   )
 
-# # Store as .tsv (June 6, 2024)
-# write.table(HGNChuman_zebrafish, file = "HGNChuman_zebrafishOrthologs.tsv",
-#             sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
-# 
-# write.table(HGNCzebrafish_human, file = "HGNCzebrafish_humanOrthologs.tsv",
-#             sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
-
 # Single Gene Ortholog analysis
 # Filter to keep only unique, one-to-one mappings in both datasets
 one_to_one_human <- HGNChuman_zebrafish %>%
@@ -444,6 +437,13 @@ print(average_one_to_many) # 11.0 zebrafish/9.7 humans
 
 HGNCzebrafish_human %>% filter(average_support > 6) %>% summarise(count = n())
 
+# # Store as .tsv (June 6, 2024)
+# write.table(HGNChuman_zebrafish, file = "HGNChuman_zebrafishOrthologs.tsv",
+#             sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
+# 
+# write.table(HGNCzebrafish_human, file = "HGNCzebrafish_humanOrthologs.tsv",
+#             sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
+
 # HGNC Filter "Many to Many" --------------------------------------------------
 # Filter for predictions with manual support
 manualHGNC_orthologs <- hgnc_orthologsDF %>% 
@@ -477,10 +477,10 @@ subsetNot_manualHGNC <- hgnc_orthologsDF[human_gene_id %in% subsetNot_manualHGNC
 subsetNot_manualHGNC <- subsetNot_manualHGNC[zebrafish_gene_id != "-"]  # 3 062 genes (8315 + 3062 = 11 377, correct)
 
 # Append data
-subset_manualHGNC <- rbind(subset_manualHGNC, subsetNot_manualHGNC)
+manualHGNC_bind <- rbind(subset_manualHGNC, subsetNot_manualHGNC)
 
 # Count occurrences and list all matching zebrafish genes for each human gene
-subset_HGNChuman_zebrafish <- subset_manualHGNC %>%
+subset_HGNChuman_zebrafish <- manualHGNC_bind %>%
   # 11 377 unique human gene IDs
   group_by(human_gene_id) %>%
   summarise(
@@ -510,6 +510,36 @@ subset_HGNChuman_zebrafish <- subset_manualHGNC %>%
     )
   )
 
+# Identify dropped zebrafish orthologs
+setDT(subset_HGNChuman_zebrafish)
+
+# Merge to compare zebrafish counts
+comparison_df <- merge(
+  subset_HGNChuman_zebrafish[, .(human_gene_id, new_zebrafish_count = zebrafish_count, new_zebrafish_gene_id = zebrafish_gene_id)],
+  HGNChuman_zebrafish[, .(human_gene_id, original_zebrafish_count = zebrafish_count, original_zebrafish_gene_id = zebrafish_gene_id)],
+  by = "human_gene_id",
+  all = TRUE
+)
+
+# Drop rows where filtering was not applied (i.e., one-to-one relationship)
+comparison_df <- comparison_df[!is.na(new_zebrafish_count)]
+
+# Identify differences in zebrafish counts
+comparison_df[, zebrafish_count_difference := new_zebrafish_count - original_zebrafish_count]
+
+# List dropped zebrafish genes
+comparison_df[, dropped_zebrafish_orthologs := mapply(function(new_genes, original_genes) {
+  new_genes <- strsplit(new_genes, ", ")[[1]]
+  original_genes <- strsplit(original_genes, ", ")[[1]]
+  paste(setdiff(original_genes, new_genes), collapse = ", ")
+}, new_zebrafish_gene_id, original_zebrafish_gene_id, SIMPLIFY = TRUE)]
+
+# Create a subset where there has been a change in zebrafish count
+filtered_changesHZ <- comparison_df[
+  zebrafish_count_difference != 0 | dropped_zebrafish_orthologs != "",
+  .(human_gene_id, zebrafish_count_difference, dropped_zebrafish_orthologs)
+]
+
 # Ensure zebrafish_gene_id columns are of the same type (character)
 manualHGNC_orthologs[, zebrafish_gene_id := as.character(zebrafish_gene_id)]
 subset_HGNCzebrafish_human[, zebrafish_gene_id := as.character(zebrafish_gene_id)]
@@ -522,13 +552,13 @@ subset_manualHGNC <- subset_manualHGNC[zebrafish_gene_id != "-"]        # 8 342 
 # i.e., assertions from the subset of "Many to Many" but no manual support
 subsetNot_manualHGNC <- subset_HGNCzebrafish_human[!(zebrafish_gene_id %in% subset_manualHGNC$zebrafish_gene_id)]
 subsetNot_manualHGNC <- hgnc_orthologsDF[zebrafish_gene_id %in% subsetNot_manualHGNC$zebrafish_gene_id]
-subsetNot_manualHGNC <- subsetNot_manualHGNC[zebrafish_gene_id != "-"]  # 3 868 genes (8342 + 3906 = 12 248, correct)
+subsetNot_manualHGNC <- subsetNot_manualHGNC[zebrafish_gene_id != "-"]  # 3 906 genes (8342 + 3906 = 12 248, correct)
 
 # Append data
-subset_manualHGNC <- rbind(subset_manualHGNC, subsetNot_manualHGNC)
+manualHGNC_bind <- rbind(subset_manualHGNC, subsetNot_manualHGNC)
 
 # Count occurrences and list all matching human genes for each zebrafish gene
-subset_HGNCzebrafish_human <- subset_manualHGNC %>%
+subset_HGNCzebrafish_human <- manualHGNC_bind %>%
   # 12 248 unique zebrafish gene IDs
   group_by(zebrafish_gene_id) %>%
   summarise(
@@ -557,6 +587,36 @@ subset_HGNCzebrafish_human <- subset_manualHGNC %>%
       TRUE ~ "No Match"
     )
   )
+
+# Identify dropped human orthologs
+setDT(subset_HGNCzebrafish_human)
+
+# Merge to compare human counts
+comparison_df <- merge(
+  subset_HGNCzebrafish_human[, .(zebrafish_gene_id, new_human_count = human_count, new_human_gene_id = human_gene_id)],
+  HGNCzebrafish_human[, .(zebrafish_gene_id, original_human_count = human_count, original_human_gene_id = human_gene_id)],
+  by = "zebrafish_gene_id",
+  all = TRUE
+)
+
+# Drop rows where filtering was not applied (i.e., one-to-one relationship)
+comparison_df <- comparison_df[!is.na(new_human_count)]
+
+# Identify differences in human counts
+comparison_df[, human_count_difference := new_human_count - original_human_count]
+
+# List dropped human genes
+comparison_df[, dropped_human_orthologs := mapply(function(new_genes, original_genes) {
+  new_genes <- strsplit(new_genes, ", ")[[1]]
+  original_genes <- strsplit(original_genes, ", ")[[1]]
+  paste(setdiff(original_genes, new_genes), collapse = ", ")
+}, new_human_gene_id, original_human_gene_id, SIMPLIFY = TRUE)]
+
+# Create a subset where there has been a change in human count
+filtered_changesZH <- comparison_df[
+  human_count_difference != 0 | dropped_human_orthologs != "",
+  .(zebrafish_gene_id, human_count_difference, dropped_human_orthologs)
+]
 
 # Check if there are any new SGOs
 one_to_one_human <- subset_HGNChuman_zebrafish %>%
@@ -628,10 +688,10 @@ ggplot(filteredHGNChuman_zebrafish, aes(x = relation_type, fill = relation_type)
   geom_bar(stat = "count", position = position_dodge(), color = colours[2:1], size = 1, alpha = 0.5) +
   geom_text(stat = 'count', aes(label = ..count..), 
             vjust = -0.5, position = position_dodge(width = 0.9), size = 7) +
-  geom_bar(data = subset(HGNChuman_zebrafish, SGO_status == "True SGO"), 
+  geom_bar(data = subset(filteredHGNChuman_zebrafish, SGO_status == "True SGO"), 
            aes(x = relation_type, fill = relation_type),
            stat = "count", position = position_dodge(), color = colours[1], size = 1) +
-  geom_text(data = subset(HGNChuman_zebrafish, SGO_status == "True SGO"), aes(label = ..count..), 
+  geom_text(data = subset(filteredHGNChuman_zebrafish, SGO_status == "True SGO"), aes(label = ..count..), 
             stat = 'count', vjust = -0.5, position = position_dodge(width = 0.9), size = 7) +
   labs(title = "Human to Zebrafish Orthology Counts By Type",
        x = NULL, y = "Count") +
@@ -657,10 +717,10 @@ ggplot(filteredHGNCzebrafish_human, aes(x = relation_type, fill = relation_type)
   geom_bar(stat = "count", position = position_dodge(), color = colours[c(3, 1)], size = 1, alpha = 0.5) +
   geom_text(stat = 'count', aes(label = ..count..), 
             vjust = -0.5, position = position_dodge(width = 0.9), size = 7) +
-  geom_bar(data = subset(HGNCzebrafish_human, SGO_status == "True SGO"), 
+  geom_bar(data = subset(filteredHGNCzebrafish_human, SGO_status == "True SGO"), 
            aes(x = relation_type, fill = relation_type),
            stat = "count", position = position_dodge(), color = colours[1], size = 1) +
-  geom_text(data = subset(HGNCzebrafish_human, SGO_status == "True SGO"), aes(label = ..count..), 
+  geom_text(data = subset(filteredHGNCzebrafish_human, SGO_status == "True SGO"), aes(label = ..count..), 
             stat = 'count', vjust = -0.5, position = position_dodge(width = 0.9), size = 7) +
   labs(title = "Zebrafish to Human Orthology Counts By Type",
        x = NULL, y = "Count") +
@@ -906,8 +966,6 @@ print(final_plot)
 
 ggsave("Overall Confidence in Orthology per Gene x3.png", plot = final_plot, device = "png", 
        width = 13.34, height = 8, dpi = 600)
-
-# 6.96
 
 # Internal Validation Work -----------------------------------------------------
 # OrthoDB only subset (should be 70732 rows)
